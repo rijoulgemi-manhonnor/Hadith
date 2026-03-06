@@ -2,6 +2,8 @@ import requests
 import os
 import logging
 import random
+import re
+import hashlib
 from datetime import datetime
 from pathlib import Path
 import json
@@ -22,7 +24,7 @@ if groq_client:
 
 
 class GroqHadithExplainer:
-    """Génère des explications de hadiths en arabe uniquement"""
+    """Génère des explications de hadiths en arabe"""
     
     def __init__(self, client):
         self.client = client
@@ -34,7 +36,6 @@ class GroqHadithExplainer:
         cache_key = hashlib.md5(hadith_text[:100].encode()).hexdigest()
         cache_file = self.cache_dir / f"{cache_key}.json"
         
-        # Vérifier le cache
         if cache_file.exists():
             with open(cache_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -76,15 +77,41 @@ class GroqHadithExplainer:
 
 
 class HadeethEncAPI:
-    """Client pour l'API HadeethEnc.com avec filtrage des hadiths contenant 'دعاء'"""
+    """Client pour l'API HadeethEnc.com avec détection des invocations"""
     
     BASE_URL = "https://hadeethenc.com/api/v1"
+    
+    # Motifs d'invocation en arabe
+    DUA_PATTERNS = [
+        r'اللهم\s+',
+        r'ربنا\s+',
+        r'رب\s+',
+        r'رب\s+[اعزوجل]',
+        r'يا\s+رب',
+        r'يا\s+الله',
+        r'اللَّهُمَّ',
+        r'رَبَّنَا',
+        r'رَبِّ',
+        r'اغفر\s+لي',
+        r'ارحمنا',
+        r'اهدنا',
+        r'تقبل',
+        r'استجب'
+    ]
     
     def __init__(self):
         self.session = requests.Session()
     
-    def get_hadith_with_dua(self, max_attempts=10):
-        """Récupère un hadith contenant 'دعاء'"""
+    def contains_dua(self, text):
+        """Vérifie si le texte contient une invocation"""
+        text = text.strip()
+        for pattern in self.DUA_PATTERNS:
+            if re.search(pattern, text):
+                return True
+        return False
+    
+    def get_hadith_with_dua(self, max_attempts=15):
+        """Récupère un hadith contenant une invocation"""
         
         for attempt in range(max_attempts):
             try:
@@ -103,9 +130,9 @@ class HadeethEncAPI:
                 hadith_data = data['data']
                 hadith_text = hadith_data.get('content') or hadith_data.get('hadith', {}).get('content', '')
                 
-                # Vérifier si le hadith contient "دعاء"
-                if "دعاء" in hadith_text:
-                    logging.info(f"✅ Hadith avec دعاء trouvé (tentative {attempt+1})")
+                # Vérifier si le hadith contient une invocation
+                if self.contains_dua(hadith_text):
+                    logging.info(f"✅ Hadith avec invocation trouvé (tentative {attempt+1})")
                     
                     # Récupérer les détails complets
                     hadith_id = hadith_data.get('id')
@@ -116,12 +143,12 @@ class HadeethEncAPI:
                     else:
                         return self._extract_hadith_data(hadith_data)
                 
-                logging.info(f"⏳ Tentative {attempt+1}: pas de دعاء, recherche continue...")
+                logging.info(f"⏳ Tentative {attempt+1}/{max_attempts}: pas d'invocation, recherche...")
                 
             except Exception as e:
                 logging.error(f"Erreur tentative {attempt+1}: {e}")
         
-        logging.warning("⚠️ Aucun hadith avec دعاء trouvé après {} tentatives".format(max_attempts))
+        logging.warning(f"⚠️ Aucun hadith avec invocation trouvé après {max_attempts} tentatives")
         return None
     
     def get_hadith_details(self, hadith_id):
@@ -173,10 +200,10 @@ def get_hijri_date():
 
 
 def format_telegram_message(hadith_data, hijri_date, groq_explanation=None):
-    """Formate le message Telegram en arabe uniquement"""
+    """Formate le message Telegram en arabe"""
     metadata = hadith_data['metadata']
     
-    message = f"""🌙 *حديث اليوم*
+    message = f"""🌙 *حديث الدعاء*
 
 📚 *الكتاب*: {metadata['collection']}
 🔢 *الرقم*: {metadata['number']}
@@ -200,7 +227,7 @@ def format_telegram_message(hadith_data, hijri_date, groq_explanation=None):
 
     message += """
 
-#حديث #دعاء #إسلام #سنة"""
+#حديث #دعاء #أدعية #إسلام #سنة"""
     
     return message
 
@@ -228,7 +255,7 @@ def send_telegram_message(message):
 def run():
     """Fonction principale"""
     logging.info("=" * 50)
-    logging.info("🚀 Démarrage du Bot Hadith (Version simplifiée)")
+    logging.info("🚀 Démarrage du Bot Hadith (Hadiths d'invocations)")
     logging.info("=" * 50)
     
     # Vérifications
@@ -240,13 +267,13 @@ def run():
     hijri_date = get_hijri_date()
     logging.info(f"📅 Date: {hijri_date}")
     
-    # Récupérer un hadith avec "دعاء"
+    # Récupérer un hadith avec invocation
     client = HadeethEncAPI()
-    hadith_data = client.get_hadith_with_dua(max_attempts=10)
+    hadith_data = client.get_hadith_with_dua(max_attempts=15)
     
     if not hadith_data:
-        logging.error("❌ Aucun hadith avec دعاء trouvé")
-        send_telegram_message("⚠️ لم يتم العثور على حديث يحتوي على 'دعاء' اليوم")
+        logging.error("❌ Aucun hadith avec invocation trouvé")
+        send_telegram_message("⚠️ لم يتم العثور على حديث يحتوي على دعاء اليوم")
         return
     
     logging.info(f"✅ Hadith trouvé: {hadith_data['metadata']['collection']} n°{hadith_data['metadata']['number']}")
