@@ -21,106 +21,158 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 if groq_client:
     logging.info("✅ GroqCloud initialisé")
 
-class AlternativeHadithAPI:
-    """API alternative pour les hadiths - Gratuite et fiable"""
+class CorrectHadithAPI:
+    """Version corrigée - Utilise la recherche par mot-clé"""
     
-    # API gratuite de hadiths (trouvée dans les recherches)
     BASE_URL = "https://hadithapi.com/api"
     
-    # Motifs d'invocation en arabe
-    DUA_PATTERNS = [
-        r'اللهم\s+', r'ربنا\s+', r'رب\s+', r'رب\s+[اعزوجل]',
-        r'يا\s+رب', r'يا\s+الله', r'اللَّهُمَّ', r'رَبَّنَا',
-        r'رَبِّ', r'اغفر\s+لي', r'ارحمنا', r'اهدنا', r'تقبل', r'استجب'
+    # Mots-clés d'invocation pour la recherche
+    DUA_KEYWORDS = [
+        "اللهم", "ربنا", "رب", "يا رب", "يا الله",
+        "اغفر لي", "ارحمنا", "اهدنا", "تقبل", "استجب"
     ]
     
     # Livres disponibles
-    BOOKS = [
-        "sahih-bukhari", "sahih-muslim", "sunan-abu-dawud",
-        "sunan-tirmidhi", "sunan-nasai", "sunan-ibnmajah"
-    ]
+    BOOKS = {
+        "sahih-bukhari": "صحيح البخاري",
+        "sahih-muslim": "صحيح مسلم",
+        "sunan-abu-dawud": "سنن أبي داود",
+        "sunan-tirmidhi": "جامع الترمذي",
+        "sunan-nasai": "سنن النسائي",
+        "sunan-ibnmajah": "سنن ابن ماجه"
+    }
     
     def __init__(self):
         self.session = requests.Session()
-        # Note: Cette API ne nécessite pas de clé pour des usages basiques
-        logging.info("✅ Client AlternativeHadithAPI initialisé")
+        logging.info("✅ Client CorrectHadithAPI initialisé")
     
-    def contains_dua(self, text):
-        """Vérifie si le texte contient une invocation"""
-        text = text.strip()
-        for pattern in self.DUA_PATTERNS:
-            if re.search(pattern, text):
-                return True
-        return False
-    
-    def get_random_hadith(self):
-        """Récupère un hadith aléatoire"""
-        url = f"{self.BASE_URL}/hadiths/random"
+    def search_hadith_by_keyword(self, keyword, book=None, max_results=10):
+        """
+        Recherche des hadiths contenant un mot-clé spécifique
+        """
+        url = f"{self.BASE_URL}/hadiths/"
+        params = {
+            'search': keyword,
+            'paginate': max_results
+        }
+        
+        if book:
+            params['book'] = book
         
         try:
-            response = self.session.get(url, timeout=15)
+            logging.info(f"🔍 Recherche de hadiths avec le mot-clé: {keyword}")
+            response = self.session.get(url, params=params, timeout=15)
             response.raise_for_status()
             data = response.json()
             
-            if data and data.get('status') == 200:
-                hadith = data.get('hadith', {})
-                return {
-                    "hadith_text": hadith.get('hadithArabic', ''),
-                    "metadata": {
-                        "collection": hadith.get('book', {}).get('name', ''),
-                        "number": hadith.get('hadithNumber', ''),
-                        "grade": hadith.get('status', 'Sahih')
-                    },
-                    "success": True
-                }
+            if data and data.get('hadiths', {}).get('data'):
+                hadiths = data['hadiths']['data']
+                logging.info(f"✅ {len(hadiths)} hadiths trouvés pour '{keyword}'")
+                return hadiths
+            else:
+                logging.info(f"ℹ️ Aucun hadith trouvé pour '{keyword}'")
+                return []
+                
         except Exception as e:
-            logging.error(f"Erreur API Hadith: {e}")
-        
-        return None
+            logging.error(f"❌ Erreur recherche '{keyword}': {e}")
+            return []
     
-    def get_hadith_with_dua(self, max_attempts=20):
-        """Récupère un hadith contenant une invocation"""
+    def get_hadith_with_dua_correct(self):
+        """
+        Méthode CORRECTE: Récupère un hadith contenant une invocation
+        en utilisant la recherche par mots-clés
+        """
+        # Mélanger les mots-clés pour varier les résultats
+        keywords = self.DUA_KEYWORDS.copy()
+        random.shuffle(keywords)
         
+        # Essayer chaque mot-clé
+        for keyword in keywords:
+            # Chercher dans tous les livres ou un livre aléatoire
+            if random.choice([True, False]):
+                # Recherche dans un livre spécifique
+                book = random.choice(list(self.BOOKS.keys()))
+                hadiths = self.search_hadith_by_keyword(keyword, book=book, max_results=20)
+            else:
+                # Recherche dans tous les livres
+                hadiths = self.search_hadith_by_keyword(keyword, max_results=30)
+            
+            if hadiths:
+                # Filtrer pour s'assurer que le hadith contient bien l'invocation
+                valid_hadiths = []
+                for h in hadiths:
+                    text = h.get('hadithArabic', '')
+                    # Vérification plus précise avec l'expression régulière complète
+                    if re.search(r'اللهم|ربنا|رب\s+[يا]?|اغفر|ارحم|اهدنا|تقبل|استجب', text):
+                        valid_hadiths.append(h)
+                
+                if valid_hadiths:
+                    # Choisir un hadith aléatoire parmi les résultats
+                    selected = random.choice(valid_hadiths)
+                    
+                    # Récupérer le nom du livre
+                    book_name = selected.get('book', {}).get('name', '')
+                    book_key = next((k for k, v in self.BOOKS.items() if v == book_name), 'sahih-bukhari')
+                    
+                    logging.info(f"✅ Hadith avec invocation trouvé via recherche '{keyword}'")
+                    
+                    return {
+                        "hadith_text": selected.get('hadithArabic', ''),
+                        "metadata": {
+                            "collection": book_name,
+                            "number": selected.get('hadithNumber', ''),
+                            "grade": selected.get('status', 'صحيح'),
+                            "book_key": book_key
+                        },
+                        "success": True
+                    }
+        
+        # Si aucun hadith trouvé avec les mots-clés, essayer l'endpoint aléatoire
+        logging.info("ℹ️ Aucun hadith trouvé par recherche, utilisation de l'endpoint aléatoire...")
+        return self.get_random_hadith_fallback()
+    
+    def get_random_hadith_fallback(self, max_attempts=10):
+        """
+        Fallback: Endpoint aléatoire avec vérification
+        """
         for attempt in range(max_attempts):
             try:
-                # Sélectionner un livre aléatoire
-                book = random.choice(self.BOOKS)
-                page = random.randint(1, 50)
+                # Choisir un livre aléatoire
+                book = random.choice(list(self.BOOKS.keys()))
                 
-                url = f"{self.BASE_URL}/hadiths"
+                url = f"{self.BASE_URL}/hadiths/"
                 params = {
                     'book': book,
-                    'paginate': 1,
-                    'page': page
+                    'paginate': 20
                 }
                 
-                response = self.session.get(url, params=params, timeout=15)
-                response.raise_for_status()
+                response = self.session.get(url, params=params, timeout=10)
                 data = response.json()
                 
                 if data and data.get('hadiths', {}).get('data'):
                     hadiths = data['hadiths']['data']
+                    
+                    # Vérifier chaque hadith
                     for hadith in hadiths:
-                        hadith_text = hadith.get('hadithArabic', '')
-                        
-                        if self.contains_dua(hadith_text):
-                            logging.info(f"✅ Hadith avec invocation trouvé (tentative {attempt+1})")
+                        text = hadith.get('hadithArabic', '')
+                        if re.search(r'اللهم|ربنا|رب\s+[يا]?|اغفر|ارحم|اهدنا|تقبل|استجب', text):
+                            book_name = hadith.get('book', {}).get('name', '')
+                            
                             return {
-                                "hadith_text": hadith_text,
+                                "hadith_text": text,
                                 "metadata": {
-                                    "collection": hadith.get('book', {}).get('name', book),
+                                    "collection": book_name,
                                     "number": hadith.get('hadithNumber', ''),
-                                    "grade": hadith.get('status', 'Sahih')
+                                    "grade": hadith.get('status', 'صحيح')
                                 },
                                 "success": True
                             }
-                
-                logging.info(f"⏳ Tentative {attempt+1}/{max_attempts}: pas d'invocation, recherche...")
-                
+                    
+                    logging.info(f"⏳ Tentative {attempt+1}/{max_attempts}: pas d'invocation dans cette page")
+                    
             except Exception as e:
-                logging.error(f"Erreur tentative {attempt+1}: {e}")
+                logging.error(f"❌ Erreur fallback: {e}")
         
-        logging.warning(f"⚠️ Aucun hadith avec invocation trouvé après {max_attempts} tentatives")
         return None
 
 class GroqHadithExplainer:
@@ -247,7 +299,7 @@ def send_telegram_message(message):
 def run():
     """Fonction principale"""
     logging.info("=" * 50)
-    logging.info("🚀 Démarrage du Bot Hadith (Version Alternative)")
+    logging.info("🚀 Démarrage du Bot Hadith (Version CORRIGÉE)")
     logging.info("=" * 50)
     
     # Vérifications
@@ -259,9 +311,9 @@ def run():
     hijri_date = get_hijri_date()
     logging.info(f"📅 Date: {hijri_date}")
     
-    # Récupérer un hadith avec invocation (NOUVELLE API)
-    client = AlternativeHadithAPI()
-    hadith_data = client.get_hadith_with_dua(max_attempts=20)
+    # Récupérer un hadith avec invocation (MÉTHODE CORRECTE)
+    client = CorrectHadithAPI()
+    hadith_data = client.get_hadith_with_dua_correct()
     
     if not hadith_data:
         logging.error("❌ Aucun hadith avec invocation trouvé")
@@ -269,6 +321,7 @@ def run():
         return
     
     logging.info(f"✅ Hadith trouvé: {hadith_data['metadata']['collection']} n°{hadith_data['metadata']['number']}")
+    logging.info(f"📝 Début du hadith: {hadith_data['hadith_text'][:100]}...")
     
     # Générer l'explication
     groq_explanation = None
