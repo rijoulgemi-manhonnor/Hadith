@@ -14,7 +14,6 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Configuration logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Initialisation de Groq
@@ -22,6 +21,107 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 if groq_client:
     logging.info("✅ GroqCloud initialisé")
 
+class AlternativeHadithAPI:
+    """API alternative pour les hadiths - Gratuite et fiable"""
+    
+    # API gratuite de hadiths (trouvée dans les recherches)
+    BASE_URL = "https://hadithapi.com/api"
+    
+    # Motifs d'invocation en arabe
+    DUA_PATTERNS = [
+        r'اللهم\s+', r'ربنا\s+', r'رب\s+', r'رب\s+[اعزوجل]',
+        r'يا\s+رب', r'يا\s+الله', r'اللَّهُمَّ', r'رَبَّنَا',
+        r'رَبِّ', r'اغفر\s+لي', r'ارحمنا', r'اهدنا', r'تقبل', r'استجب'
+    ]
+    
+    # Livres disponibles
+    BOOKS = [
+        "sahih-bukhari", "sahih-muslim", "sunan-abu-dawud",
+        "sunan-tirmidhi", "sunan-nasai", "sunan-ibnmajah"
+    ]
+    
+    def __init__(self):
+        self.session = requests.Session()
+        # Note: Cette API ne nécessite pas de clé pour des usages basiques
+        logging.info("✅ Client AlternativeHadithAPI initialisé")
+    
+    def contains_dua(self, text):
+        """Vérifie si le texte contient une invocation"""
+        text = text.strip()
+        for pattern in self.DUA_PATTERNS:
+            if re.search(pattern, text):
+                return True
+        return False
+    
+    def get_random_hadith(self):
+        """Récupère un hadith aléatoire"""
+        url = f"{self.BASE_URL}/hadiths/random"
+        
+        try:
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data and data.get('status') == 200:
+                hadith = data.get('hadith', {})
+                return {
+                    "hadith_text": hadith.get('hadithArabic', ''),
+                    "metadata": {
+                        "collection": hadith.get('book', {}).get('name', ''),
+                        "number": hadith.get('hadithNumber', ''),
+                        "grade": hadith.get('status', 'Sahih')
+                    },
+                    "success": True
+                }
+        except Exception as e:
+            logging.error(f"Erreur API Hadith: {e}")
+        
+        return None
+    
+    def get_hadith_with_dua(self, max_attempts=20):
+        """Récupère un hadith contenant une invocation"""
+        
+        for attempt in range(max_attempts):
+            try:
+                # Sélectionner un livre aléatoire
+                book = random.choice(self.BOOKS)
+                page = random.randint(1, 50)
+                
+                url = f"{self.BASE_URL}/hadiths"
+                params = {
+                    'book': book,
+                    'paginate': 1,
+                    'page': page
+                }
+                
+                response = self.session.get(url, params=params, timeout=15)
+                response.raise_for_status()
+                data = response.json()
+                
+                if data and data.get('hadiths', {}).get('data'):
+                    hadiths = data['hadiths']['data']
+                    for hadith in hadiths:
+                        hadith_text = hadith.get('hadithArabic', '')
+                        
+                        if self.contains_dua(hadith_text):
+                            logging.info(f"✅ Hadith avec invocation trouvé (tentative {attempt+1})")
+                            return {
+                                "hadith_text": hadith_text,
+                                "metadata": {
+                                    "collection": hadith.get('book', {}).get('name', book),
+                                    "number": hadith.get('hadithNumber', ''),
+                                    "grade": hadith.get('status', 'Sahih')
+                                },
+                                "success": True
+                            }
+                
+                logging.info(f"⏳ Tentative {attempt+1}/{max_attempts}: pas d'invocation, recherche...")
+                
+            except Exception as e:
+                logging.error(f"Erreur tentative {attempt+1}: {e}")
+        
+        logging.warning(f"⚠️ Aucun hadith avec invocation trouvé après {max_attempts} tentatives")
+        return None
 
 class GroqHadithExplainer:
     """Génère des explications de hadiths en arabe"""
@@ -74,114 +174,6 @@ class GroqHadithExplainer:
         except Exception as e:
             logging.error(f"Erreur Groq: {e}")
             return None
-
-
-class HadeethEncAPI:
-    """Client pour l'API HadeethEnc.com avec détection des invocations"""
-    
-    BASE_URL = "https://hadeethenc.com/api/v1"
-    
-    # Motifs d'invocation en arabe
-    DUA_PATTERNS = [
-        r'اللهم\s+',
-        r'ربنا\s+',
-        r'رب\s+',
-        r'رب\s+[اعزوجل]',
-        r'يا\s+رب',
-        r'يا\s+الله',
-        r'اللَّهُمَّ',
-        r'رَبَّنَا',
-        r'رَبِّ',
-        r'اغفر\s+لي',
-        r'ارحمنا',
-        r'اهدنا',
-        r'تقبل',
-        r'استجب'
-    ]
-    
-    def __init__(self):
-        self.session = requests.Session()
-    
-    def contains_dua(self, text):
-        """Vérifie si le texte contient une invocation"""
-        text = text.strip()
-        for pattern in self.DUA_PATTERNS:
-            if re.search(pattern, text):
-                return True
-        return False
-    
-    def get_hadith_with_dua(self, max_attempts=15):
-        """Récupère un hadith contenant une invocation"""
-        
-        for attempt in range(max_attempts):
-            try:
-                # Récupérer un hadith aléatoire
-                response = self.session.get(
-                    f"{self.BASE_URL}/hadiths/random",
-                    params={"language": "ar"},
-                    timeout=15
-                )
-                response.raise_for_status()
-                data = response.json()
-                
-                if not data or not data.get('data'):
-                    continue
-                
-                hadith_data = data['data']
-                hadith_text = hadith_data.get('content') or hadith_data.get('hadith', {}).get('content', '')
-                
-                # Vérifier si le hadith contient une invocation
-                if self.contains_dua(hadith_text):
-                    logging.info(f"✅ Hadith avec invocation trouvé (tentative {attempt+1})")
-                    
-                    # Récupérer les détails complets
-                    hadith_id = hadith_data.get('id')
-                    details = self.get_hadith_details(hadith_id)
-                    
-                    if details:
-                        return details
-                    else:
-                        return self._extract_hadith_data(hadith_data)
-                
-                logging.info(f"⏳ Tentative {attempt+1}/{max_attempts}: pas d'invocation, recherche...")
-                
-            except Exception as e:
-                logging.error(f"Erreur tentative {attempt+1}: {e}")
-        
-        logging.warning(f"⚠️ Aucun hadith avec invocation trouvé après {max_attempts} tentatives")
-        return None
-    
-    def get_hadith_details(self, hadith_id):
-        """Récupère les détails complets"""
-        try:
-            response = self.session.get(
-                f"{self.BASE_URL}/hadiths/{hadith_id}",
-                params={"language": "ar"},
-                timeout=15
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            if data and data.get('data'):
-                return self._extract_hadith_data(data['data'], detailed=True)
-        except:
-            pass
-        return None
-    
-    def _extract_hadith_data(self, data, detailed=False):
-        """Extrait les données du hadith"""
-        collection = data.get('collection', {})
-        grade = data.get('grade', {})
-        
-        return {
-            "hadith_text": data.get('content') or data.get('hadith', {}).get('content', ''),
-            "metadata": {
-                "collection": collection.get('name', ''),
-                "number": data.get('number', ''),
-                "grade": grade.get('name', '')
-            },
-            "success": True
-        }
 
 
 def get_hijri_date():
@@ -255,7 +247,7 @@ def send_telegram_message(message):
 def run():
     """Fonction principale"""
     logging.info("=" * 50)
-    logging.info("🚀 Démarrage du Bot Hadith (Hadiths d'invocations)")
+    logging.info("🚀 Démarrage du Bot Hadith (Version Alternative)")
     logging.info("=" * 50)
     
     # Vérifications
@@ -267,9 +259,9 @@ def run():
     hijri_date = get_hijri_date()
     logging.info(f"📅 Date: {hijri_date}")
     
-    # Récupérer un hadith avec invocation
-    client = HadeethEncAPI()
-    hadith_data = client.get_hadith_with_dua(max_attempts=15)
+    # Récupérer un hadith avec invocation (NOUVELLE API)
+    client = AlternativeHadithAPI()
+    hadith_data = client.get_hadith_with_dua(max_attempts=20)
     
     if not hadith_data:
         logging.error("❌ Aucun hadith avec invocation trouvé")
