@@ -1,12 +1,9 @@
-import requests
 import os
 import logging
-import random
-import re
+import json
 import hashlib
 from datetime import datetime
 from pathlib import Path
-import json
 from groq import Groq
 
 # --- CONFIGURATION ---
@@ -21,170 +18,99 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 if groq_client:
     logging.info("✅ GroqCloud initialisé")
 
-class CorrectHadithAPI:
-    """Version corrigée - Utilise la recherche par mot-clé"""
-    
-    BASE_URL = "https://hadithapi.com/api"
-    
-    # Mots-clés d'invocation pour la recherche
-    DUA_KEYWORDS = [
-        "اللهم", "ربنا", "رب", "يا رب", "يا الله",
-        "اغفر لي", "ارحمنا", "اهدنا", "تقبل", "استجب"
-    ]
-    
-    # Livres disponibles
-    BOOKS = {
-        "sahih-bukhari": "صحيح البخاري",
-        "sahih-muslim": "صحيح مسلم",
-        "sunan-abu-dawud": "سنن أبي داود",
-        "sunan-tirmidhi": "جامع الترمذي",
-        "sunan-nasai": "سنن النسائي",
-        "sunan-ibnmajah": "سنن ابن ماجه"
-    }
-    
-    def __init__(self):
-        self.session = requests.Session()
-        logging.info("✅ Client CorrectHadithAPI initialisé")
-    
-    def search_hadith_by_keyword(self, keyword, book=None, max_results=10):
-        """
-        Recherche des hadiths contenant un mot-clé spécifique
-        """
-        url = f"{self.BASE_URL}/hadiths/"
-        params = {
-            'search': keyword,
-            'paginate': max_results
-        }
-        
-        if book:
-            params['book'] = book
-        
-        try:
-            logging.info(f"🔍 Recherche de hadiths avec le mot-clé: {keyword}")
-            response = self.session.get(url, params=params, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data and data.get('hadiths', {}).get('data'):
-                hadiths = data['hadiths']['data']
-                logging.info(f"✅ {len(hadiths)} hadiths trouvés pour '{keyword}'")
-                return hadiths
-            else:
-                logging.info(f"ℹ️ Aucun hadith trouvé pour '{keyword}'")
-                return []
-                
-        except Exception as e:
-            logging.error(f"❌ Erreur recherche '{keyword}': {e}")
-            return []
-    
-    def get_hadith_with_dua_correct(self):
-        """
-        Méthode CORRECTE: Récupère un hadith contenant une invocation
-        en utilisant la recherche par mots-clés
-        """
-        # Mélanger les mots-clés pour varier les résultats
-        keywords = self.DUA_KEYWORDS.copy()
-        random.shuffle(keywords)
-        
-        # Essayer chaque mot-clé
-        for keyword in keywords:
-            # Chercher dans tous les livres ou un livre aléatoire
-            if random.choice([True, False]):
-                # Recherche dans un livre spécifique
-                book = random.choice(list(self.BOOKS.keys()))
-                hadiths = self.search_hadith_by_keyword(keyword, book=book, max_results=20)
-            else:
-                # Recherche dans tous les livres
-                hadiths = self.search_hadith_by_keyword(keyword, max_results=30)
-            
-            if hadiths:
-                # Filtrer pour s'assurer que le hadith contient bien l'invocation
-                valid_hadiths = []
-                for h in hadiths:
-                    text = h.get('hadithArabic', '')
-                    # Vérification plus précise avec l'expression régulière complète
-                    if re.search(r'اللهم|ربنا|رب\s+[يا]?|اغفر|ارحم|اهدنا|تقبل|استجب', text):
-                        valid_hadiths.append(h)
-                
-                if valid_hadiths:
-                    # Choisir un hadith aléatoire parmi les résultats
-                    selected = random.choice(valid_hadiths)
-                    
-                    # Récupérer le nom du livre
-                    book_name = selected.get('book', {}).get('name', '')
-                    book_key = next((k for k, v in self.BOOKS.items() if v == book_name), 'sahih-bukhari')
-                    
-                    logging.info(f"✅ Hadith avec invocation trouvé via recherche '{keyword}'")
-                    
-                    return {
-                        "hadith_text": selected.get('hadithArabic', ''),
-                        "metadata": {
-                            "collection": book_name,
-                            "number": selected.get('hadithNumber', ''),
-                            "grade": selected.get('status', 'صحيح'),
-                            "book_key": book_key
-                        },
-                        "success": True
-                    }
-        
-        # Si aucun hadith trouvé avec les mots-clés, essayer l'endpoint aléatoire
-        logging.info("ℹ️ Aucun hadith trouvé par recherche, utilisation de l'endpoint aléatoire...")
-        return self.get_random_hadith_fallback()
-    
-    def get_random_hadith_fallback(self, max_attempts=10):
-        """
-        Fallback: Endpoint aléatoire avec vérification
-        """
-        for attempt in range(max_attempts):
-            try:
-                # Choisir un livre aléatoire
-                book = random.choice(list(self.BOOKS.keys()))
-                
-                url = f"{self.BASE_URL}/hadiths/"
-                params = {
-                    'book': book,
-                    'paginate': 20
-                }
-                
-                response = self.session.get(url, params=params, timeout=10)
-                data = response.json()
-                
-                if data and data.get('hadiths', {}).get('data'):
-                    hadiths = data['hadiths']['data']
-                    
-                    # Vérifier chaque hadith
-                    for hadith in hadiths:
-                        text = hadith.get('hadithArabic', '')
-                        if re.search(r'اللهم|ربنا|رب\s+[يا]?|اغفر|ارحم|اهدنا|تقبل|استجب', text):
-                            book_name = hadith.get('book', {}).get('name', '')
-                            
-                            return {
-                                "hadith_text": text,
-                                "metadata": {
-                                    "collection": book_name,
-                                    "number": hadith.get('hadithNumber', ''),
-                                    "grade": hadith.get('status', 'صحيح')
-                                },
-                                "success": True
-                            }
-                    
-                    logging.info(f"⏳ Tentative {attempt+1}/{max_attempts}: pas d'invocation dans cette page")
-                    
-            except Exception as e:
-                logging.error(f"❌ Erreur fallback: {e}")
-        
-        return None
-
-class GroqHadithExplainer:
-    """Génère des explications de hadiths en arabe"""
+class GroqOnlyHadithBot:
+    """Bot qui utilise UNIQUEMENT Groq pour tout"""
     
     def __init__(self, client):
         self.client = client
         self.cache_dir = Path("groq_cache")
         self.cache_dir.mkdir(exist_ok=True)
+        logging.info("✅ Bot GroqOnly initialisé")
+    
+    def get_hadith_with_dua(self):
+        """
+        Utilise Groq pour générer un hadith authentique contenant une invocation
+        """
+        cache_key = "daily_hadith_dua"
+        cache_file = self.cache_dir / f"{cache_key}.json"
+        
+        # Vérifier le cache (24h)
+        if cache_file.exists():
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if (datetime.now() - datetime.fromisoformat(data['timestamp'])).days < 1:
+                    logging.info("✅ Hadith trouvé dans le cache")
+                    return data['hadith_data']
+        
+        prompt = """أنت عالم حديث متخصص. المطلوب: اذكر حديثاً صحيحاً واحداً من الأحاديث النبوية الشريفة يستوفي الشروط التالية:
+
+1. يجب أن يكون الحديث صحيحاً (من صحيح البخاري أو مسلم أو غيرهما من كتب الحديث المعتمدة).
+2. يجب أن يحتوي الحديث على دعاء أو ابتهال إلى الله تعالى (مثل: اللهم، ربنا، رب، اغفر لي، ارحمني، اهدني، تقبل منا، ونحو ذلك).
+3. اذكر نص الحديث كاملاً باللغة العربية الفصحى كما ورد.
+4. اذكر مصدر الحديث (الكتاب ورقم الحديث إن أمكن).
+5. اذكر درجة الحديث (صحيح، حسن، وغير ذلك).
+
+أخرج المعلومات بالصيغة التالية (JSON فقط، بدون أي نص إضافي):
+
+{
+  "hadith_text": "نص الحديث الكامل هنا",
+  "source": "اسم الكتاب (مثل: صحيح البخاري)",
+  "number": "رقم الحديث إن وجد، أو ضع رقم/صفحة تقريبية",
+  "grade": "درجة الحديث (مثل: صحيح)"
+}
+
+تأكد من أن النص العربي صحيح وخالٍ من الأخطاء الإملائية."""
+        
+        try:
+            logging.info("🤖 Groq génère un hadith avec invocation...")
+            
+            response = self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "أنت عالم حديث سلفي متخصص. ترد فقط بصيغة JSON ولا تكتب أي شيء آخر."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1500,
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            
+            # Validation basique
+            required_fields = ['hadith_text', 'source', 'number', 'grade']
+            if not all(field in result for field in required_fields):
+                logging.error("❌ Réponse JSON incomplète")
+                return None
+            
+            hadith_data = {
+                "hadith_text": result['hadith_text'],
+                "metadata": {
+                    "collection": result['source'],
+                    "number": result['number'],
+                    "grade": result['grade']
+                },
+                "success": True
+            }
+            
+            # Sauvegarder dans le cache
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'timestamp': datetime.now().isoformat(),
+                    'hadith_data': hadith_data
+                }, f, ensure_ascii=False)
+            
+            logging.info(f"✅ Hadith généré par Groq: {result['source']} n°{result['number']}")
+            return hadith_data
+            
+        except Exception as e:
+            logging.error(f"❌ Erreur Groq: {e}")
+            return None
     
     def generate_explanation(self, hadith_text, metadata):
-        """Génère une explication en arabe"""
+        """
+        Génère l'explication du hadith en arabe
+        """
         cache_key = hashlib.md5(hadith_text[:100].encode()).hexdigest()
         cache_file = self.cache_dir / f"{cache_key}.json"
         
@@ -194,27 +120,29 @@ class GroqHadithExplainer:
                 if (datetime.now() - datetime.fromisoformat(data['timestamp'])).days < 7:
                     return data['explanation']
         
-        prompt = f"""بصفتك متخصصاً في علوم الحديث، اشرح هذا الحديث باللغة العربية فقط:
+        prompt = f"""اشرح الحديث النبوي التالي شرحاً وافياً باللغة العربية:
 
-الحديث: {hadith_text[:500]}...
+الحديث: {hadith_text[:700]}
 
-المعلومات:
-- الكتاب: {metadata['collection']}
-- الرقم: {metadata['number']}
+المصدر: {metadata['collection']} (رقم {metadata['number']})
 
-اكتب:
-1. معنى الكلمات الغريبة
-2. شرح مختصر للحديث
-3. الفوائد المستفادة
+المطلوب في الشرح:
+1. **شرح الكلمات الغريبة** في الحديث.
+2. **المعنى الإجمالي** للحديث.
+3. **الفوائد والأحكام المستفادة** من الحديث.
+4. **الدروس والعبر**.
 
-200 كلمة كحد أقصى."""
+كن دقيقاً ومختصراً (لا يزيد الشرح عن 250 كلمة)."""
         
         try:
             response = self.client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=500
+                messages=[
+                    {"role": "system", "content": "أنت عالم حديث متمكن. اكتب شرحاً واضحاً ومفيداً."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.5,
+                max_tokens=800
             )
             
             explanation = response.choices[0].message.content.strip()
@@ -223,61 +151,29 @@ class GroqHadithExplainer:
                 json.dump({'timestamp': datetime.now().isoformat(), 'explanation': explanation}, f)
             
             return explanation
+            
         except Exception as e:
-            logging.error(f"Erreur Groq: {e}")
+            logging.error(f"❌ Erreur génération explication: {e}")
             return None
 
 
 def get_hijri_date():
-    """Récupère la date Hijri"""
+    """Récupère la date Hijri (API externe légère)"""
     try:
+        import requests
         today = datetime.now().strftime("%d-%m-%Y")
         response = requests.get(f"http://api.aladhan.com/v1/gToH?date={today}", timeout=5)
-        
         if response.status_code == 200:
             data = response.json()['data']['hijri']
             return f"{data['day']} {data['month']['ar']} {data['year']}"
     except:
         pass
-    
     return datetime.now().strftime("%d %B %Y")
-
-
-def format_telegram_message(hadith_data, hijri_date, groq_explanation=None):
-    """Formate le message Telegram en arabe"""
-    metadata = hadith_data['metadata']
-    
-    message = f"""🌙 *حديث الدعاء*
-
-📚 *الكتاب*: {metadata['collection']}
-🔢 *الرقم*: {metadata['number']}
-⭐ *الدرجة*: {metadata['grade']}
-📅 *التاريخ*: {hijri_date}
-
-━━━━━━━━━━━━━━━━
-
-📖 *الحديث:*
-{hadith_data['hadith_text']}
-
-━━━━━━━━━━━━━━━━"""
-
-    if groq_explanation:
-        message += f"""
-
-📝 *الشرح:*
-{groq_explanation}
-
-━━━━━━━━━━━━━━━━"""
-
-    message += """
-
-#حديث #دعاء #أدعية #إسلام #سنة"""
-    
-    return message
 
 
 def send_telegram_message(message):
     """Envoie le message Telegram"""
+    import requests
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
     try:
@@ -296,10 +192,40 @@ def send_telegram_message(message):
         return False
 
 
+def format_message(hadith_data, hijri_date, explanation=None):
+    """Formate le message final"""
+    meta = hadith_data['metadata']
+    
+    msg = f"""🌙 *حديث الدعاء*
+
+📚 *المصدر*: {meta['collection']}
+🔢 *الرقم*: {meta['number']}
+⭐ *الدرجة*: {meta['grade']}
+📅 *التاريخ*: {hijri_date}
+
+━━━━━━━━━━━━━━━━
+
+📖 *الحديث:*
+{hadith_data['hadith_text']}
+
+━━━━━━━━━━━━━━━━"""
+
+    if explanation:
+        msg += f"""
+
+📝 *الشرح:*
+{explanation}
+
+━━━━━━━━━━━━━━━━"""
+
+    msg += "\n\n#حديث #دعاء #أدعية #إسلام #سنة"
+    return msg
+
+
 def run():
     """Fonction principale"""
     logging.info("=" * 50)
-    logging.info("🚀 Démarrage du Bot Hadith (Version CORRIGÉE)")
+    logging.info("🚀 Bot Hadith (Propulsé par Groq)")
     logging.info("=" * 50)
     
     # Vérifications
@@ -307,44 +233,41 @@ def run():
         logging.error("❌ Clés API manquantes")
         return
     
-    # Date
-    hijri_date = get_hijri_date()
-    logging.info(f"📅 Date: {hijri_date}")
+    # Initialisation
+    bot = GroqOnlyHadithBot(groq_client)
     
-    # Récupérer un hadith avec invocation (MÉTHODE CORRECTE)
-    client = CorrectHadithAPI()
-    hadith_data = client.get_hadith_with_dua_correct()
+    # 1. Obtenir un hadith avec invocation via Groq
+    hadith_data = bot.get_hadith_with_dua()
     
     if not hadith_data:
-        logging.error("❌ Aucun hadith avec invocation trouvé")
-        send_telegram_message("⚠️ لم يتم العثور على حديث يحتوي على دعاء اليوم")
+        logging.error("❌ Échec génération hadith")
+        send_telegram_message("⚠️ عذراً، لم نتمكن من تحضير حديث الدعاء اليوم.")
         return
     
-    logging.info(f"✅ Hadith trouvé: {hadith_data['metadata']['collection']} n°{hadith_data['metadata']['number']}")
-    logging.info(f"📝 Début du hadith: {hadith_data['hadith_text'][:100]}...")
+    # 2. Date hijri
+    hijri_date = get_hijri_date()
     
-    # Générer l'explication
-    groq_explanation = None
-    if groq_client:
-        explainer = GroqHadithExplainer(groq_client)
-        groq_explanation = explainer.generate_explanation(
-            hadith_data['hadith_text'],
-            hadith_data['metadata']
-        )
-        
-        if groq_explanation:
-            logging.info(f"✅ Explication générée ({len(groq_explanation)} caractères)")
+    # 3. Générer l'explication
+    explanation = bot.generate_explanation(
+        hadith_data['hadith_text'],
+        hadith_data['metadata']
+    )
     
-    # Envoyer
-    message = format_telegram_message(hadith_data, hijri_date, groq_explanation)
+    # 4. Formater et envoyer
+    message = format_message(hadith_data, hijri_date, explanation)
     
     if send_telegram_message(message):
         logging.info("✅ Message envoyé avec succès!")
     else:
-        logging.error("❌ Échec de l'envoi")
+        logging.error("❌ Échec envoi")
     
     logging.info("=" * 50)
 
 
 if __name__ == "__main__":
+    # Import requests uniquement si nécessaire
+    try:
+        import requests
+    except ImportError:
+        pass
     run()
